@@ -150,7 +150,7 @@ function StatCard({ title, value, icon: Icon, description, trend, loading }: Sta
 export function OverviewClient() {
   const { activeStoreId } = useActiveStore()
 
-  // Candidates summary
+  // Candidates summary (recent 5)
   const { data: candidatesData, isLoading: candidatesLoading } = useQuery({
     queryKey: queryKeys.products.candidates({ limit: 5 }),
     queryFn: async () => {
@@ -160,11 +160,21 @@ export function OverviewClient() {
     staleTime: 30_000,
   })
 
-  // All candidates for counts
-  const { data: allCandidates } = useQuery({
-    queryKey: queryKeys.products.candidates({}),
+  // Total candidates count (limit=1 to get total without fetching all items)
+  const { data: totalCandidatesData } = useQuery({
+    queryKey: queryKeys.products.candidates({ limit: 1, _count: 'all' }),
     queryFn: async () => {
-      const res = await productsApi.getCandidates({ limit: 100 })
+      const res = await productsApi.getCandidates({ limit: 1 })
+      return res.data
+    },
+    staleTime: 30_000,
+  })
+
+  // Approved candidates count (limit=1)
+  const { data: approvedCandidatesData } = useQuery({
+    queryKey: queryKeys.products.candidates({ limit: 1, status: 'approved' }),
+    queryFn: async () => {
+      const res = await productsApi.getCandidates({ limit: 1, status: 'approved' })
       return res.data
     },
     staleTime: 30_000,
@@ -207,9 +217,8 @@ export function OverviewClient() {
     staleTime: 30_000,
   })
 
-  const totalCandidates = allCandidates?.total ?? 0
-  const approvedCandidates =
-    allCandidates?.items.filter((c) => c.status === 'approved').length ?? 0
+  const totalCandidates = totalCandidatesData?.total ?? 0
+  const approvedCandidates = approvedCandidatesData?.total ?? 0
   const totalPublished = publishedData?.total ?? 0
 
   const statsLoading = candidatesLoading || publishedLoading || analyticsLoading
