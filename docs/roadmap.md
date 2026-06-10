@@ -1,304 +1,262 @@
-# ASE — Implementation Roadmap
+# ASE — Roadmap de Implementación (Personal Use)
 
-## Overview
-
-6 phases, each validated before the next begins.
-Each phase produces a working, testable vertical slice — not scaffolding.
+## Resumen de Fases
 
 ```
-Phase 0 ──► Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5 ──► Phase 6
-  Arch       Infra +     Product     Marketing   Shopify     Analytics   Polish +
-  Design     Auth +      Hunter      + Images    Publisher   + Notif.    Prod-Ready
-             Dashboard   Agent
+Phase 0 ──► Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5
+  Arch       Infra +     Product     Marketing   Shopify     Analytics
+  Design     Auth +      Hunter      + Images    Publisher   + Notif. +
+  ✓DONE      Dashboard   Agent                              Scheduler
              Skeleton
 ```
 
----
-
-## Phase 0 — Architecture & Design (Current)
-**Goal:** Complete technical blueprint. No implementation.
-
-**Deliverables:**
-- [x] `ARCHITECTURE.md` — System topology, all Mermaid diagrams
-- [x] `docs/technical-design.md` — Detailed service design decisions
-- [x] `docs/database-schema.sql` — Complete PostgreSQL DDL
-- [x] `docs/folder-structure.md` — Full monorepo directory tree
-- [x] `docs/api-contracts.md` — All API endpoints documented
-- [x] `docs/roadmap.md` — This document
-
-**Gate:** Architecture validated by stakeholders before Phase 1 starts.
+Cada fase termina con algo **funcionando de verdad** — no scaffolding.
 
 ---
 
-## Phase 1 — Infrastructure + Auth + Dashboard Skeleton
-**Duration:** ~2 weeks
-**Goal:** Everything boots, users can log in, stores can be connected, dashboard shell is visible.
+## Phase 0 — Arquitectura y Diseño ✅
+**Estado:** Completo
 
-### Week 1 — Backend Foundation
-- [ ] Monorepo scaffolding (all service directories, shared package)
-- [ ] `shared/python/ase_shared` package:
-  - Database (SQLAlchemy async, Alembic)
-  - Redis client
-  - Celery config
-  - Structured logging (structlog)
-  - Encryption utilities
-  - Base exception hierarchy
-- [ ] Alembic initial migration (all 13 tables)
-- [ ] Auth Service:
-  - Register / Login / Refresh / Logout
-  - JWT RS256 (generate keys in `scripts/generate-keys.sh`)
-  - Store CRUD + Shopify connection test
-  - Role-based access (admin/operator/viewer)
-- [ ] API Gateway:
-  - JWT middleware
-  - Redis rate limiting
-  - HTTPX proxy routes
-  - SSE endpoint (stub)
+- [x] ARCHITECTURE.md con 9 diagramas Mermaid
+- [x] docs/technical-design.md
+- [x] docs/database-schema.sql (11 tablas, personal use)
+- [x] docs/folder-structure.md
+- [x] docs/api-contracts.md
+- [x] docs/roadmap.md
 
-### Week 2 — Frontend + Docker
-- [ ] Next.js 15 project setup (TypeScript, TailwindCSS, shadcn/ui, Zustand, React Query)
-- [ ] Auth pages (login, register)
+---
+
+## Phase 1 — Infraestructura + Auth + Dashboard Skeleton
+
+**Goal:** `docker compose up` → puedes hacer login y ver el dashboard vacío. Tiendas Shopify conectadas.
+
+### Backend Foundation
+- [ ] Scaffolding del monorepo (directorios de servicios, paquete shared)
+- [ ] `shared/python/ase_shared`:
+  - `database/` — SQLAlchemy async + Alembic
+  - `cache/redis.py` — aioredis factory
+  - `messaging/celery_config.py` — app factory + queues
+  - `logging/config.py` — structlog JSON
+  - `security/encryption.py` — Fernet para tokens Shopify
+  - `security/hashing.py` — bcrypt helpers
+  - `exceptions.py`
+- [ ] Migración Alembic inicial (todas las tablas)
+- [ ] Auth Service (`services/auth/`):
+  - `POST /login` — verifica password vs env, crea session en Redis
+  - `POST /logout` — revoca session
+  - `GET /verify` — valida session token (usado por otros servicios)
+  - `GET/POST/PUT/DELETE /stores` — CRUD tiendas Shopify
+  - `POST /stores/{id}/test-connection` — verifica token Shopify
+- [ ] Nginx config (`infra/nginx/nginx.conf`)
+
+### Frontend
+- [ ] Next.js 15 setup (TypeScript, TailwindCSS, shadcn/ui, Zustand, React Query)
+- [ ] Pantalla de login (password único)
 - [ ] Dashboard layout (sidebar, header, store switcher)
-- [ ] Overview page (placeholder widgets)
-- [ ] Settings page (profile, store management)
-- [ ] Docker Compose (postgres, redis, minio, traefik, all services)
-- [ ] `scripts/setup.sh` + `scripts/generate-keys.sh`
-- [ ] `README.md` with local setup instructions
-- [ ] GitHub Actions CI (lint + test for auth + gateway)
+- [ ] Overview page (widgets placeholder)
+- [ ] Settings page (gestión de tiendas)
+- [ ] BFF proxy (`app/api/[...proxy]/route.ts`)
+- [ ] Hook `useSSE.ts` para eventos en tiempo real
+
+### Docker
+- [ ] `docker-compose.yml` (postgres, redis, minio, nginx, todos los servicios stub)
+- [ ] `docker-compose.dev.yml` (hot-reload para frontend y servicios)
+- [ ] `services/*/Dockerfile` (base para todos los servicios — stubs que arrancan OK)
+- [ ] `scripts/setup.sh` — clona + configura `.env.local` + levanta stack
+- [ ] `scripts/generate-keys.sh` — genera FERNET_KEY + SECRET_KEY + ADMIN_PASSWORD_HASH
+- [ ] `scripts/migrate.sh` — ejecuta Alembic
 
 **Definition of Done:**
-- User can register, login, connect a Shopify store, see the dashboard shell
-- All services boot via `docker compose up`
-- Auth service tests ≥ 80% coverage
+- `./scripts/setup.sh && docker compose up` funciona sin errores
+- Login con contraseña, ver dashboard, conectar una tienda Shopify
+- `GET /health` en todos los servicios responde OK
 
 ---
 
 ## Phase 2 — Product Hunter Agent
-**Duration:** ~2 weeks
-**Goal:** The system can discover and score product candidates autonomously.
 
-### Week 3 — Scraping Infrastructure
-- [ ] `BaseScraper` ABC + `PlaywrightScraper` base (browser pool)
-- [ ] Scraper implementations:
+**Goal:** El sistema descubre productos automáticamente, los puntúa con IA, aparecen en el dashboard.
+
+### Semana A — Scraping
+- [ ] `BaseScraper` ABC + `PlaywrightScraper` base (pool de browsers)
+- [ ] Scrapers:
   - TikTok Creative Center (Playwright)
-  - AliExpress (HTTP + Playwright fallback)
+  - AliExpress (HTTP)
   - Amazon Movers & Shakers (HTTP)
   - Facebook Ad Library (Playwright)
-  - Google Trends (HTTP API)
-  - Reddit (Reddit API or HTTP)
-- [ ] Normalizer (scraper output → `ScrapedProduct` standard schema)
-- [ ] Deduplicator (SHA-256 hash + Redis bloom filter)
-- [ ] Celery worker setup for `products.scrape` queue
-- [ ] Product Hunter API routes (candidates CRUD + job trigger)
+  - Google Trends (API)
+  - Reddit (HTTP/API)
+- [ ] Normalizer: salida de scrapers → `ScrapedProduct` estándar
+- [ ] Deduplicator: hash SHA-256 + Redis para check O(1)
+- [ ] Celery worker para `products.scrape`
 
-### Week 4 — Scoring + UI
-- [ ] DeepSeek scoring integration:
-  - Prompt template for product analysis
-  - 7-dimension score extraction
-  - Weighted `success_score` calculation
-- [ ] Celery tasks: `hunt_products`, `score_candidate`, `batch_score`
-- [ ] Dashboard: Products page
-  - Candidates table (filter by status, source, score)
-  - Candidate detail page (scores, raw data, AI analysis)
-  - Approve / Reject actions
-- [ ] Scheduler: default `hunt_products` every 6h
-- [ ] Product Hunter tests ≥ 80% coverage
+### Semana B — Scoring + UI
+- [ ] DeepSeek integration:
+  - Prompt template de análisis de producto
+  - Extracción de 7 dimensiones de score
+  - Cálculo de `success_score` ponderado
+- [ ] Celery tasks: `hunt_products`, `score_candidate`
+- [ ] Product Hunter API routes (candidatos + jobs)
+- [ ] Dashboard: Productos page
+  - Tabla de candidatos con filtros (status, fuente, score)
+  - Detalle de candidato (scores, análisis IA, imágenes)
+  - Botones Aprobar / Rechazar
+  - Progreso en tiempo real via SSE
+- [ ] Scheduler: job `hunt_products` cada 6h por defecto
 
 **Definition of Done:**
-- Running `docker compose up` + triggering a hunt job discovers real products
-- Candidates appear in the dashboard with scores
-- User can approve/reject from the UI
+- Trigger manual de scraping desde el dashboard
+- Candidatos aparecen con score en < 5 min
+- Aprobar/rechazar funciona, status persiste
 
 ---
 
-## Phase 3 — Marketing & Image Pipeline
-**Duration:** ~2 weeks
-**Goal:** Approved products get full marketing content and product images automatically.
+## Phase 3 — Marketing Agent + Image Pipeline
 
-### Week 5 — Marketing Agent
+**Goal:** Producto aprobado → assets de marketing y 7 imágenes generados automáticamente.
+
+### Semana C — Marketing Agent
 - [ ] `LLMProvider` abstraction (DeepSeek + OpenAI + Anthropic)
-- [ ] Jinja2 prompt templates for all content types
-- [ ] Context builder (product → rich LLM context)
-- [ ] Output parsers for structured JSON extraction
-- [ ] Quality validator
-- [ ] Generate all marketing assets:
-  - Brand name, tagline, descriptions, bullets, FAQs
-  - SEO (meta title, description, 10 keywords)
-  - 10 hooks, 5 headlines, 5 CTAs, 5 ad copies
-  - Platform-specific: Facebook, Instagram, TikTok, Google, Email
-- [ ] Marketing Service API + Celery worker
-- [ ] Dashboard: Marketing page (assets list + detail editor)
+- [ ] Templates Jinja2:
+  - `branding.j2` — nombre, tagline
+  - `description.j2` — short/long description, bullets, FAQs
+  - `seo.j2` — meta title, description, keywords
+  - `ad_copy.j2` — hooks, headlines, CTAs, copies
+  - `ads_platform.j2` — variantes por plataforma
+- [ ] Context builder: producto → contexto rico para LLM
+- [ ] Output parser: JSON estructurado desde respuesta LLM
+- [ ] Quality validator (longitud, campos requeridos)
+- [ ] Marketing Service API + worker `marketing.generate`
+- [ ] Dashboard: Marketing page (lista assets, editor de copy)
 
-### Week 6 — Image Pipeline
-- [ ] `ImageProvider` abstraction (OpenAI DALL·E 3 + Stability AI)
-- [ ] Prompt generator (product data → image prompt per type)
-- [ ] 7 image types: hero, lifestyle, infographic, before_after, banner, ad_square, ad_story
-- [ ] CLIP-score quality review (auto-reject below threshold)
-- [ ] MinIO S3 upload + CDN URL
-- [ ] Image Pipeline API + Celery worker
-- [ ] Dashboard: Image gallery per product with approve/regenerate
-- [ ] SSE real-time progress updates during generation
+### Semana D — Image Pipeline
+- [ ] `ImageProvider` abstraction (DALL·E 3 + Stability AI)
+- [ ] Prompt generator por tipo de imagen
+- [ ] 7 tipos: hero, lifestyle, infographic, before_after, banner, ad_square, ad_story
+- [ ] CLIP score quality check
+- [ ] Upload a MinIO + URL CDN
+- [ ] Image Pipeline API + worker `images.generate`
+- [ ] Dashboard: galería de imágenes por producto (aprobar / regenerar)
+- [ ] SSE progress durante generación
 
 **Definition of Done:**
-- Approving a product automatically triggers marketing + image generation
-- All assets visible in dashboard within minutes
-- Copy can be manually edited before publishing
+- Aprobar producto → marketing + imágenes generados sin intervención
+- Editar copy desde el dashboard y guardar
+- Regenerar imagen individual funciona
 
 ---
 
 ## Phase 4 — Shopify Publisher
-**Duration:** ~1.5 weeks
-**Goal:** Products publish to Shopify with one click (or automatically).
 
-### Week 7 — Shopify Integration
-- [ ] Async Shopify Admin API client (per-store rate limiter, retry with backoff)
-- [ ] Publish checklist validation
-- [ ] Full publish flow:
-  - Upload images to Shopify CDN
-  - Create product with variants
-  - Set collections + tags
-  - Configure SEO
-  - Set pricing
-- [ ] Update + archive product operations
-- [ ] Shopify webhook receiver (product updated, order created)
-- [ ] Publisher API + Celery worker
+**Goal:** Un click publica el producto completo en Shopify (imágenes + copy + precio + SEO).
 
-### Week 7.5 — Publisher UI
-- [ ] Dashboard: Shopify page (published products, sync status)
-- [ ] One-click publish from product detail page
-- [ ] Publish status real-time updates (SSE)
-- [ ] Store management page (connect multiple stores)
-- [ ] Publisher tests ≥ 80% coverage
+- [ ] Async Shopify Admin API client con rate limiter por tienda
+- [ ] Publish checklist (validación pre-publicación)
+- [ ] Flujo completo:
+  - Upload de imágenes a Shopify CDN
+  - Crear producto con variantes
+  - Asignar colecciones + tags
+  - Configurar SEO
+  - Establecer precios
+- [ ] Update + archivar producto
+- [ ] Shopify webhook receiver (actualizaciones externas)
+- [ ] Publisher API + worker `publish.shopify`
+- [ ] Dashboard:
+  - Botón "Publicar en Shopify" en detalle de producto
+  - Estado en tiempo real (SSE)
+  - Lista de productos publicados con sync status
+  - Gestión de múltiples tiendas
+- [ ] Tests unitarios del publisher (mocked Shopify API)
 
 **Definition of Done:**
-- Full flow: scrape → approve → generate content → publish to Shopify works end-to-end
-- Multi-store publishing works correctly
+- Flujo end-to-end completo: scrape → aprobar → generar → publicar en Shopify real
+- Producto aparece en Shopify con imágenes, descripción y precio correcto
+- Multi-tienda: publicar en tienda A y tienda B funciona
 
 ---
 
-## Phase 5 — Analytics + Notifications + Scheduler
-**Duration:** ~2 weeks
-**Goal:** Full observability of performance + automated decision recommendations.
+## Phase 5 — Analytics + Notificaciones + Scheduler UI
 
-### Week 8 — Analytics
-- [ ] Shopify Analytics integration (orders, revenue, sessions)
-- [ ] KPI calculator (CTR, CPC, CPA, ROAS, conversion rate, AOV, LTV)
-- [ ] Decision engine (scale / optimize / pause rules)
-- [ ] Analytics table population
-- [ ] Materialized view refresh job
-- [ ] Analytics API routes (summary, timeseries, product performance)
+**Goal:** Sistema corre solo 24/7 y me notifica cuando hay algo que atender.
+
+### Analytics
+- [ ] Shopify Analytics integration (órdenes, revenue, sesiones)
+- [ ] KPI calculator (CTR, CPC, CPA, ROAS, CVR, AOV, profit)
+- [ ] Decision engine (scale/optimize/pause)
+- [ ] Refresh de vista materializada (job diario)
+- [ ] Analytics API
 - [ ] Dashboard: Performance page
-  - ROAS chart (line, 30d)
+  - ROAS chart 30 días
   - Revenue + profit widgets
-  - Campaign table with decisions
-  - Per-product performance drill-down
+  - Tabla de campañas con decisiones recomendadas
 
-### Week 9 — Notifications + Scheduler Polish
-- [ ] Notification Service:
-  - Email (SMTP via SMTP2Go/SES)
-  - Discord (webhook)
-  - Telegram (Bot API)
-  - Slack (incoming webhook)
-  - Retry logic (3x with 5-min delays)
-- [ ] All notification events wired:
-  - New winner found
-  - Critical agent error
-  - Product published
-  - ROAS drop below threshold
-  - ROAS scale opportunity
-- [ ] Dashboard: Notifications bell + unread count
-- [ ] Notification settings page (channel preferences per event)
-- [ ] Scheduler UI in settings (view/edit/pause scheduled jobs)
-- [ ] Agent Monitor page (status, last run, cost, token usage)
-- [ ] Logs page (filterable agent logs)
+### Notificaciones
+- [ ] Notification dispatcher
+- [ ] Channels: Email (SMTP), Discord (webhook), Telegram (Bot API), Slack (webhook)
+- [ ] Retry (3x con 5 min de espera)
+- [ ] Todos los eventos conectados:
+  - Nuevo producto ganador
+  - Error crítico de agente
+  - Producto publicado
+  - ROAS < 1 (alerta pause)
+  - ROAS > 3 (alerta scale)
+- [ ] Dashboard: bell de notificaciones + contador no leídas
+- [ ] Settings: configurar canales por tipo de evento
+
+### Scheduler + Agentes
+- [ ] Celery Beat con scheduler de DB
+- [ ] Dashboard: Agents page
+  - Estado actual de cada agente
+  - Última ejecución + duración media
+  - Errores recientes
+  - Coste de IA acumulado
+  - Trigger manual
+- [ ] Dashboard: Logs page (filtro por agente, nivel, fecha)
+- [ ] Settings: editar frecuencia de jobs programados
 
 **Definition of Done:**
-- Full system runs autonomously; user notified on Discord/Telegram when winner found
-- Dashboard shows real ROAS data for published products
-- Agent monitor shows all agent run history
+- Sistema corre 48h sin intervención y encuentra candidatos
+- Recibo notificación en Telegram cuando hay nuevo ganador
+- Dashboard muestra ROAS real de productos publicados
 
 ---
 
-## Phase 6 — Production Hardening
-**Duration:** ~2 weeks
-**Goal:** Production-ready: security audit, full test coverage, CI/CD, observability.
+## Estimación de Tiempo
 
-### Week 10 — Testing + Security
-- [ ] Achieve 80% test coverage across all services
-- [ ] E2E tests (Playwright):
-  - Login flow
-  - Product approval + publish flow
-  - Settings configuration
-- [ ] Security review:
-  - All Shopify tokens confirmed encrypted at rest
-  - JWT RS256 keys rotated by `generate-keys.sh`
-  - CSRF protection on state-changing endpoints
-  - Input validation on all endpoints (Pydantic)
-  - SQL injection verified (SQLAlchemy parameterized only)
-  - XSS headers (Content-Security-Policy via Traefik)
-  - Rate limiting verified under load
-- [ ] Dependency audit (pip-audit + npm audit)
-
-### Week 11 — Observability + CI/CD
-- [ ] Prometheus metrics on all services (`/metrics`)
-- [ ] Grafana dashboards:
-  - ASE Overview (revenue, ROAS, agent status)
-  - Celery Worker Health
-  - Product Hunter Pipeline
-- [ ] Health check endpoints (`/health`, `/ready`)
-- [ ] GitHub Actions CI complete (all services, matrix build)
-- [ ] GitHub Actions CD (staging auto-deploy, prod manual)
-- [ ] Docker production images (multi-stage, non-root user, slim)
-- [ ] `docker-compose.prod.yml` (resource limits, no volumes, env injection)
-- [ ] `scripts/setup.sh` — one-command local setup
-- [ ] OpenAPI docs aggregated at `/api/docs`
-- [ ] Semantic versioning (`CHANGELOG.md`)
-
-### Week 12 — Documentation + Kubernetes Prep
-- [ ] `README.md` complete (architecture overview, quick start, env vars)
-- [ ] `docs/` complete (all 6 docs finalized)
-- [ ] Kubernetes manifests in `infra/k8s/` (deployments, services, ingress, configmaps)
-- [ ] Kubernetes HPA configs (scale workers on CPU/memory)
-- [ ] Migration guide (Docker Compose → K8s)
-
-**Definition of Done:**
-- Zero high-severity security findings
-- All CI checks pass
-- Single `./scripts/setup.sh && docker compose up` boots the full system
-- Grafana dashboard shows live metrics
-
----
-
-## Future Roadmap (Post-v1)
-
-| Feature | Phase | Priority |
+| Phase | Semanas | Complejidad |
 |---|---|---|
-| Meta Ads API integration | 7 | High |
-| TikTok Ads API integration | 7 | High |
-| Google Ads API integration | 7 | Medium |
-| Auto-apply ROAS decisions (feature flag) | 7 | High |
-| AI product description A/B testing | 8 | Medium |
-| Competitor price monitoring | 8 | Medium |
-| Supplier direct integration (AliExpress DSers) | 8 | High |
-| Customer segmentation + LTV prediction | 9 | Medium |
-| Video ad generation (AI) | 9 | Low |
-| White-label / agency mode (sub-accounts) | 10 | High |
-| Mobile app (React Native) | 10 | Low |
-| Kubernetes production deployment | Ongoing | High |
-| Per-service database isolation | Ongoing | Medium |
+| Phase 0 (Arch) | 1 | ✅ Hecho |
+| Phase 1 (Infra + Auth) | 1.5 | Media |
+| Phase 2 (Product Hunter) | 2 | Alta (scraping) |
+| Phase 3 (Marketing + Images) | 2 | Media |
+| Phase 4 (Publisher) | 1.5 | Media |
+| Phase 5 (Analytics + Notif) | 2 | Media |
+| **Total** | **~10 semanas** | — |
+
+---
+
+## Orden de Prioridad si Hay Restricciones de Tiempo
+
+Si quieres tener algo útil lo antes posible, este es el orden de valor:
+
+1. **Phase 1** — Sin esto nada funciona
+2. **Phase 2** — El core del sistema. Sin scraping no hay nada que publicar
+3. **Phase 4** — Publicar en Shopify es el objetivo principal
+4. **Phase 3** — El contenido manual funciona de momento; los agentes lo automatizan
+5. **Phase 5** — Sin analytics puedes revisar Shopify directamente mientras tanto
 
 ---
 
 ## Decision Log
 
-| Date | Decision | Rationale |
-|---|---|---|
-| Phase 0 | Monorepo | Atomic changes, shared code, small team |
-| Phase 0 | Shared PostgreSQL (Phase 1) | Reduce ops overhead; migrate in Phase 4 |
-| Phase 0 | Celery + Redis (not RabbitMQ) | Redis already required; simpler stack |
-| Phase 0 | DeepSeek primary AI | Cost-efficient; OpenAI/Claude available as premium fallback |
-| Phase 0 | JWT RS256 (not HS256) | Public key can be distributed to all services without sharing secret |
-| Phase 0 | Fernet for Shopify tokens | Reversible encryption needed (must decrypt to use); not bcrypt |
-| Phase 0 | SSE (not WebSocket) | One-way server→client events sufficient; simpler infra |
-| Phase 0 | Traefik + FastAPI Gateway | Traefik for routing/TLS; FastAPI for auth middleware logic |
-| Phase 0 | MinIO for images | S3-compatible locally; swap endpoint URL for AWS S3 in prod |
+| Decisión | Razón |
+|---|---|
+| Sin API Gateway | Overhead innecesario para 1 usuario |
+| Auth por password en .env | Máxima simplicidad; no hay gestión de cuentas |
+| Sin audit_log / api_keys | Features SaaS que no aportan valor personal |
+| Sin RLS | Un solo usuario = sin aislamiento de datos necesario |
+| Nginx en vez de Traefik | Más simple, bien conocido, suficiente para uso personal |
+| HS256 no RS256 para JWT | Sin distribución de clave pública entre servicios externos |
+| Session token opaco en Redis | Más simple y revocable al instante vs JWT |
+| Docker Compose sin K8s | Hardware personal no necesita orquestación |
+| Cobertura de tests razonable | Foco en funcionalidad, no en métricas corporativas |

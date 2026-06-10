@@ -1,20 +1,22 @@
 # Autonomous Shopify Engine (ASE) — Architecture
 
-> **Phase 0 — Architecture & Technical Design**
-> This document defines the complete system architecture. No implementation begins until this is validated.
+> **Uso personal:** Un único usuario administrador, 1-3 tiendas Shopify propias.
+> Sin overhead de SaaS: sin multi-tenancy complejo, sin RBAC, sin API Gateway.
 
 ---
 
 ## 1. System Overview
 
-ASE is a multi-agent SaaS platform that autonomously discovers profitable products, generates marketing content, publishes to Shopify, and monitors performance — all from a single dashboard supporting multiple stores.
+ASE es una plataforma multiagente para uso personal que descubre productos ganadores,
+genera contenido de marketing, publica en Shopify y monitoriza el rendimiento —
+todo desde un dashboard local.
 
-**Core design principles:**
-- Each service owns its domain and can be deployed independently
-- All inter-service async communication goes through Celery/Redis (not direct HTTP calls between services)
-- All sync external-facing communication routes through the API Gateway
-- Shared database schema in Phase 1, migrating to per-service schemas in Phase 3+
-- Secrets never stored in code; always injected via environment or secret manager
+**Principios de diseño:**
+- Cada agente es un servicio independiente con su propio worker Celery
+- Toda operación asíncrona va por Celery/Redis
+- El dashboard Next.js actúa como BFF (proxy directo a los servicios)
+- Un solo usuario; sin gestión de cuentas ni permisos complejos
+- Corre completo en una sola máquina con Docker Compose
 
 ---
 
@@ -24,110 +26,89 @@ ASE is a multi-agent SaaS platform that autonomously discovers profitable produc
 graph TB
     subgraph EXTERNAL["External Systems"]
         TT[TikTok Creative Center]
-        AE[AliExpress]
+        AE[AliExpress / Temu]
         AM[Amazon]
         FB[Facebook Ad Library]
         GT[Google Trends]
         RD[Reddit]
         SH[Shopify Admin API]
         DS[DeepSeek API]
-        IM[Image Model APIs]
+        IM[Image Model APIs<br/>DALL·E · Stability AI]
         NT[Notification Channels<br/>Email · Discord · Telegram · Slack]
     end
 
-    subgraph CLIENT["Client Layer"]
+    subgraph CLIENT["Browser"]
         WEB[Next.js 15 Dashboard<br/>:3000]
     end
 
-    subgraph GATEWAY["API Gateway Layer"]
-        GW[API Gateway<br/>FastAPI :8000]
-        TR[Traefik<br/>Reverse Proxy :80/443]
+    subgraph PROXY["Nginx :80"]
+        NG[Reverse Proxy]
     end
 
-    subgraph SERVICES["Backend Services"]
+    subgraph SERVICES["Agent Services"]
         AUTH[Auth Service<br/>:8001]
         HUNTER[Product Hunter<br/>:8002]
-        MARKET[Marketing Service<br/>:8003]
+        MARKET[Marketing<br/>:8003]
         IMGPIPE[Image Pipeline<br/>:8004]
         PUBLISH[Shopify Publisher<br/>:8005]
-        ANALYT[Analytics Service<br/>:8006]
-        NOTIF[Notification Service<br/>:8007]
-        SCHED[Scheduler Service<br/>Celery Beat]
+        ANALYT[Analytics<br/>:8006]
+        NOTIF[Notifications<br/>:8007]
+        SCHED[Scheduler<br/>Celery Beat]
     end
 
     subgraph INFRA["Infrastructure"]
-        PG[(PostgreSQL 16<br/>:5432)]
-        RD2[(Redis 7<br/>:6379)]
-        MN[MinIO / S3<br/>:9000]
-        PR[Prometheus<br/>:9090]
-        GF[Grafana<br/>:3001]
+        PG[(PostgreSQL 16)]
+        RD2[(Redis 7)]
+        MN[MinIO S3]
+        PR[Prometheus]
+        GF[Grafana :3001]
     end
 
-    WEB -->|HTTPS| TR
-    TR -->|route /api/*| GW
-    GW -->|JWT verify| AUTH
-    GW -->|proxy| HUNTER
-    GW -->|proxy| MARKET
-    GW -->|proxy| IMGPIPE
-    GW -->|proxy| PUBLISH
-    GW -->|proxy| ANALYT
-    GW -->|proxy| NOTIF
+    WEB -->|/api/*| NG
+    NG --> AUTH & HUNTER & MARKET & IMGPIPE & PUBLISH & ANALYT & NOTIF
+    WEB -->|BFF Next.js API routes| AUTH
 
-    HUNTER -->|scrape| TT
-    HUNTER -->|scrape| AE
-    HUNTER -->|scrape| AM
-    HUNTER -->|scrape| FB
-    HUNTER -->|scrape| GT
-    HUNTER -->|scrape| RD
-    HUNTER -->|AI analysis| DS
+    HUNTER -->|scrape| TT & AE & AM & FB & GT & RD
+    HUNTER -->|AI scoring| DS
     MARKET -->|generate| DS
     IMGPIPE -->|generate| IM
     PUBLISH -->|publish| SH
     ANALYT -->|fetch| SH
     NOTIF -->|send| NT
 
-    HUNTER -->|tasks| RD2
-    MARKET -->|tasks| RD2
-    IMGPIPE -->|tasks| RD2
-    PUBLISH -->|tasks| RD2
-    ANALYT -->|tasks| RD2
-    NOTIF -->|tasks| RD2
-    SCHED -->|schedule| RD2
-
+    HUNTER & MARKET & IMGPIPE & PUBLISH & ANALYT & NOTIF & SCHED -->|tasks| RD2
     HUNTER & MARKET & IMGPIPE & PUBLISH & ANALYT & NOTIF & AUTH -->|read/write| PG
-    IMGPIPE -->|store assets| MN
-    AUTH -->|sessions/cache| RD2
-
+    IMGPIPE -->|assets| MN
+    AUTH -->|session cache| RD2
     SERVICES -->|metrics| PR
-    PR -->|visualize| GF
+    PR --> GF
 ```
 
 ---
 
-## 3. Product Lifecycle Data Flow
+## 3. Product Lifecycle
 
 ```mermaid
 flowchart LR
-    A([Scheduler<br/>triggers]) --> B[Product Hunter<br/>Scraping Workers]
-    B --> C{Deduplicate<br/>& Normalize}
-    C --> D[DeepSeek<br/>Scoring Engine]
-    D --> E[(products_candidates<br/>status=pending)]
-    E --> F{Auto-approve?<br/>score > threshold}
-    F -->|Yes / Manual| G[Approved Product]
-    F -->|No| H[Rejected]
-    G --> I[Marketing Agent<br/>Generate copy + SEO]
-    G --> J[Image Pipeline<br/>Generate visuals]
+    A([Scheduler<br/>6h]) --> B[Product Hunter<br/>Workers]
+    B --> C{Dedup +<br/>Normalize}
+    C --> D[DeepSeek<br/>Score 0-100]
+    D --> E[(products_candidates)]
+    E --> F{Score ><br/>threshold?}
+    F -->|Manual approve| G[Approved]
+    F -->|Low score| H[Rejected]
+    G --> I[Marketing Agent<br/>Copy + SEO]
+    G --> J[Image Pipeline<br/>7 tipos de imagen]
     I --> K[(marketing_assets)]
-    J --> L[(generated_images<br/>+ S3)]
+    J --> L[(generated_images + MinIO)]
     K & L --> M[Shopify Publisher]
     M --> N[Shopify Store]
-    N --> O[Analytics Agent<br/>Collect metrics]
-    O --> P[(analytics)]
-    P --> Q{Decision<br/>Engine}
-    Q -->|ROAS > 3| R[Scale]
-    Q -->|ROAS 1-3| S[Optimize]
-    Q -->|ROAS < 1| T[Pause]
-    R & S & T --> U[Notifications<br/>Dispatcher]
+    N --> O[Analytics Agent<br/>Métricas cada 6h]
+    O --> P{ROAS?}
+    P -->|> 3| Q[Scale]
+    P -->|1-3| R[Optimize]
+    P -->|< 1| S[Pause]
+    Q & R & S --> T[Notificación]
 ```
 
 ---
@@ -137,127 +118,74 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant SCH as Scheduler
-    participant MQ as Redis / Celery
+    participant MQ as Redis/Celery
     participant PH as Product Hunter
-    participant MA as Marketing Agent
+    participant MA as Marketing
     participant IP as Image Pipeline
     participant SP as Shopify Publisher
     participant AN as Analytics
     participant NO as Notifications
 
-    SCH->>MQ: Enqueue hunt_products task
-    MQ->>PH: Execute hunt_products
-    PH->>PH: Scrape sources (Playwright / Apify)
-    PH->>PH: Normalize + Deduplicate
+    SCH->>MQ: hunt_products (cada 6h)
+    MQ->>PH: scrape + normalize + deduplicate
     PH->>PH: DeepSeek scoring
-    PH->>MQ: Enqueue notify_new_candidates
-    MQ->>NO: Send "new winners" notification
+    PH->>MQ: notify (nuevos candidatos)
+    MQ->>NO: "X nuevos productos encontrados"
 
-    Note over PH,MA: On manual/auto approval
+    Note over PH,MA: Usuario aprueba desde dashboard
 
-    PH->>MQ: Enqueue generate_marketing(product_id)
-    PH->>MQ: Enqueue generate_images(product_id)
+    PH->>MQ: generate_marketing(product_id)
+    PH->>MQ: generate_images(product_id)
+    MQ->>MA: branding + copy + SEO + ads
+    MQ->>IP: 7 tipos de imagen → MinIO
 
-    MQ->>MA: Execute generate_marketing
-    MA->>MA: DeepSeek — branding + copy
-    MA-->>MQ: marketing_complete event
+    Note over MA,SP: Ambos assets listos
 
-    MQ->>IP: Execute generate_images
-    IP->>IP: Prompt generation
-    IP->>IP: Image model API call
-    IP->>IP: Quality review
-    IP->>IP: Upload to S3
-    IP-->>MQ: images_complete event
+    MQ->>SP: publish_to_shopify
+    SP->>SP: upload images + create product
+    MQ->>NO: "Producto publicado en Shopify"
 
-    Note over MA,SP: Both assets ready
-
-    MQ->>SP: Execute publish_product
-    SP->>SP: Shopify Admin API
-    SP-->>MQ: published event
-    MQ->>NO: Send "product published" notification
-
-    loop Every 6 hours
-        SCH->>MQ: Enqueue collect_analytics
-        MQ->>AN: Execute collect_analytics
-        AN->>AN: Fetch Shopify + Ad metrics
-        AN->>AN: Run decision engine
-        AN-->>MQ: decision event (scale/optimize/pause)
-        MQ->>NO: Send ROAS alert if threshold crossed
+    loop Cada 6h
+        SCH->>MQ: collect_analytics
+        MQ->>AN: fetch Shopify metrics + calcular ROAS
+        AN->>AN: decision engine
+        MQ->>NO: alerta si ROAS cruza umbral
     end
 ```
 
 ---
 
-## 5. Authentication Flow
+## 5. Auth Flow (Personal Use — Simplified)
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant GW as API Gateway
-    participant AU as Auth Service
-    participant RD as Redis
-    participant DB as PostgreSQL
+    participant B as Browser
+    participant N as Next.js BFF
+    participant A as Auth Service
+    participant R as Redis
 
-    C->>GW: POST /api/auth/login {email, password}
-    GW->>AU: Forward request
-    AU->>DB: SELECT user WHERE email
-    AU->>AU: Verify bcrypt hash
-    AU->>RD: Store refresh token hash (TTL 30d)
-    AU-->>GW: {access_token (15min), refresh_token (30d)}
-    GW-->>C: Set HttpOnly cookie + return access_token
+    B->>N: POST /api/auth/login {password}
+    N->>A: Verify password vs ADMIN_PASSWORD_HASH
+    A->>R: Store session token (TTL 30d)
+    A-->>B: Set HttpOnly cookie (session_token)
 
-    Note over C,GW: Subsequent requests
+    Note over B,N: Requests autenticados
 
-    C->>GW: GET /api/products (Authorization: Bearer <access_token>)
-    GW->>AU: Validate JWT (internal call)
-    AU->>AU: Verify signature + expiry
-    AU-->>GW: {user_id, role, store_ids}
-    GW->>GW: Inject X-User-* headers
-    GW->>GW: Forward to target service
-
-    Note over C,RD: Token refresh
-
-    C->>GW: POST /api/auth/refresh {refresh_token}
-    GW->>AU: Forward
-    AU->>RD: Validate refresh token hash
-    AU->>AU: Rotate: revoke old, issue new pair
-    AU->>RD: Store new refresh token hash
-    AU-->>C: New token pair
+    B->>N: GET /api/products (cookie)
+    N->>A: Validate session_token
+    A->>R: GET session_token → valid/invalid
+    A-->>N: OK
+    N->>N: Forward a service con token interno
 ```
 
 ---
 
-## 6. Multi-Store Architecture
-
-```mermaid
-graph TD
-    U[User Account] --> S1[Store A<br/>mystore1.myshopify.com]
-    U --> S2[Store B<br/>mystore2.myshopify.com]
-    U --> S3[Store C<br/>mystore3.myshopify.com]
-
-    S1 & S2 & S3 --> PH[Product Hunter<br/>shared pool]
-    S1 --> MA1[Marketing<br/>Store A context]
-    S2 --> MA2[Marketing<br/>Store B context]
-    S3 --> MA3[Marketing<br/>Store C context]
-
-    S1 --> PUB1[Publisher → Shopify A]
-    S2 --> PUB2[Publisher → Shopify B]
-    S3 --> PUB3[Publisher → Shopify C]
-
-    S1 & S2 & S3 --> AN[Analytics<br/>per-store metrics]
-```
-
-Every DB row is tagged with `store_id`. The API Gateway enforces store ownership: a user can only access `store_id` values that belong to their account.
-
----
-
-## 7. Infrastructure Topology (Docker Compose)
+## 6. Infrastructure (Docker Compose — Personal)
 
 ```mermaid
 graph TB
-    subgraph docker["Docker Network: ase_network"]
-        TR[traefik:80/443]
-        GW[gateway:8000]
+    subgraph docker["Docker Network: ase"]
+        NG[nginx:80]
         FE[dashboard:3000]
         AU[auth:8001]
         PH[product-hunter:8002]
@@ -268,12 +196,12 @@ graph TB
         NO[notifications:8007]
         SC[scheduler/beat]
 
-        PH_W[product-hunter-worker]
-        MA_W[marketing-worker]
-        IP_W[image-worker]
-        SP_W[publisher-worker]
-        AN_W[analytics-worker]
-        NO_W[notification-worker]
+        PH_W[ph-worker]
+        MA_W[mkt-worker]
+        IP_W[img-worker]
+        SP_W[pub-worker]
+        AN_W[ana-worker]
+        NO_W[notif-worker]
 
         PG[(postgres:5432)]
         RD[(redis:6379)]
@@ -282,9 +210,7 @@ graph TB
         GF[grafana:3001]
     end
 
-    TR --> GW
-    TR --> FE
-    GW --> AU & PH & MA & IP & SP & AN & NO
+    NG --> FE & AU & PH & MA & IP & SP & AN & NO
     PH --> PH_W
     MA --> MA_W
     IP --> IP_W
@@ -293,85 +219,54 @@ graph TB
     NO --> NO_W
     SC --> RD
     PH_W & MA_W & IP_W & SP_W & AN_W & NO_W --> RD
-    PH_W & MA_W & IP_W & SP_W & AN_W & NO_W & AU & GW --> PG
+    PH_W & MA_W & IP_W & SP_W & AN_W & NO_W & AU --> PG
     IP_W --> MN
     AU --> RD
-    PR --> GF
+    PR & GF -.->|monitoring| SERVICES
 ```
 
 ---
 
-## 8. Service Responsibilities & Ports
+## 7. Service Summary
 
-| Service | Port | Responsibility | Workers |
-|---|---|---|---|
-| Traefik | 80/443 | Reverse proxy, TLS termination | — |
-| API Gateway | 8000 | Auth middleware, routing, rate limiting | — |
-| Dashboard (Next.js) | 3000 | Web UI (BFF pattern) | — |
-| Auth Service | 8001 | JWT, refresh tokens, users, API keys | — |
-| Product Hunter | 8002 | Scraping, scoring, candidate mgmt | `product-hunter-worker` |
-| Marketing | 8003 | Branding, copy, ad generation | `marketing-worker` |
-| Image Pipeline | 8004 | Prompt gen, image gen, S3 upload | `image-worker` |
-| Shopify Publisher | 8005 | Shopify Admin API operations | `publisher-worker` |
-| Analytics | 8006 | Metrics collection, ROAS decisions | `analytics-worker` |
-| Notifications | 8007 | Multi-channel dispatch | `notification-worker` |
-| Scheduler | — | Celery Beat, cron orchestration | — |
-| PostgreSQL | 5432 | Primary data store | — |
-| Redis | 6379 | Cache, Celery broker/backend, sessions | — |
-| MinIO | 9000 | S3-compatible asset storage | — |
-| Prometheus | 9090 | Metrics scraping | — |
-| Grafana | 3001 | Metrics visualization | — |
-
----
-
-## 9. Inter-Service Communication Rules
-
-| Pattern | When to use | Implementation |
+| Service | Port | Función |
 |---|---|---|
-| Sync HTTP | User-facing requests only | Via API Gateway → service |
-| Async Task | Background operations | Celery task on named queue |
-| Event notification | Cross-service side-effects | Celery task (fire-and-forget) |
-| Cache read | Hot data, session data | Redis GET/SETEX |
-| Direct DB query | Within service own domain only | SQLAlchemy session |
-
-**Services never call each other directly.** All cross-service async work goes through named Celery queues.
-
----
-
-## 10. Security Architecture
-
-```mermaid
-graph LR
-    A[Internet] -->|TLS 1.3| B[Traefik]
-    B -->|internal| C[API Gateway]
-    C -->|verify JWT| D[Auth Service]
-    D -->|validated| C
-    C -->|X-User-ID header| E[Target Service]
-    E -->|RLS store_id check| F[(PostgreSQL)]
-
-    G[Encrypted at rest] -.-> H[Shopify tokens<br/>Fernet encryption]
-    G -.-> I[API keys<br/>bcrypt hash]
-    G -.-> J[Passwords<br/>bcrypt hash]
-```
-
-**Layers:**
-1. **Transport**: TLS 1.3 via Traefik (Let's Encrypt in prod)
-2. **Network**: All services on private Docker network; only Traefik exposed
-3. **Auth**: JWT RS256 (asymmetric keys), 15-min access tokens
-4. **Authorization**: Role-based (Admin / Operator / Viewer) + store ownership check
-5. **Data**: Shopify access tokens encrypted with Fernet before DB storage
-6. **Input**: Pydantic validation on all endpoints; parameterized SQL via SQLAlchemy
-7. **Rate limiting**: Sliding window per IP and per user_id in Redis
+| Nginx | 80 | Reverse proxy simple |
+| Dashboard (Next.js) | 3000 | UI + BFF |
+| Auth Service | 8001 | Login único, session tokens |
+| Product Hunter | 8002 | Scraping + scoring |
+| Marketing | 8003 | Copy + SEO + ads con DeepSeek |
+| Image Pipeline | 8004 | Generación de imágenes + MinIO |
+| Shopify Publisher | 8005 | Shopify Admin API |
+| Analytics | 8006 | Métricas + decisiones ROAS |
+| Notifications | 8007 | Email/Discord/Telegram/Slack |
+| Scheduler | — | Celery Beat (tareas programadas) |
+| PostgreSQL | 5432 | Base de datos principal |
+| Redis | 6379 | Broker Celery + cache sesiones |
+| MinIO | 9000 | Storage S3-compatible |
+| Prometheus | 9090 | Métricas |
+| Grafana | 3001 | Dashboards de métricas |
 
 ---
 
-## 11. Observability Architecture
+## 8. Security (Personal Use)
 
-Every service exposes:
-- `GET /health` — liveness probe
-- `GET /ready` — readiness probe
-- `GET /metrics` — Prometheus scrape endpoint
+- **Auth:** Una sola contraseña de admin hasheada con bcrypt en `.env`
+- **Session:** Token opaco almacenado en Redis, HttpOnly cookie
+- **Red:** Todos los servicios en red Docker privada; solo Nginx expuesto en :80
+- **Secrets:** Variables de entorno en `.env.local` (git-ignored)
+- **Shopify tokens:** Cifrados con Fernet antes de almacenar en DB
+- **Transport:** Nginx con certificado auto-firmado local (Let's Encrypt opcional con dominio)
 
-Structured JSON logs flow: service → stdout → Loki (or CloudWatch in prod).
+---
 
-Agent runs are recorded in `agent_logs` with token usage and AI cost tracking.
+## 9. Observability
+
+Cada servicio expone:
+- `GET /health` — liveness
+- `GET /metrics` — Prometheus scrape
+
+Grafana dashboards:
+- ASE Overview (ROAS, revenue, agent status)
+- Celery Workers (queue depth, task rate)
+- Product Hunter Pipeline (candidates/hour, score distribution)
