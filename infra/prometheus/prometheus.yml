@@ -1,0 +1,66 @@
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: "ase"
+
+rule_files: []
+
+scrape_configs:
+
+  # ── ASE API Services ──────────────────────────────────────────────────────
+
+  - job_name: "auth"
+    static_configs:
+      - targets: ["auth:8001"]
+        labels:
+          service: "auth"
+    metrics_path: "/metrics"
+
+  - job_name: "product-hunter"
+    static_configs:
+      - targets: ["product-hunter:8002"]
+        labels:
+          service: "product-hunter"
+    metrics_path: "/metrics"
+
+  - job_name: "marketing"
+    static_configs:
+      - targets: ["marketing:8003"]
+        labels:
+          service: "marketing"
+    metrics_path: "/metrics"
+
+  - job_name: "image-pipeline"
+    static_configs:
+      - targets: ["image-pipeline:8004"]
+        labels:
+          service: "image-pipeline"
+    metrics_path: "/metrics"
+
+  - job_name: "shopify-publisher"
+    static_configs:
+      - targets: ["shopify-publisher:8005"]
+        labels:
+          service: "shopify-publisher"
+    metrics_path: "/metrics"
+
+  - job_name: "analytics"
+    static_configs:
+      - targets: ["analytics:8006"]
+        labels:
+          service: "analytics"
+    metrics_path: "/metrics"
+
+  - job_name: "notifications"
+    static_configs:
+      - targets: ["notifications:8007"]
+        labels:
+          service: "notifications"
+    metrics_path: "/metrics"
+
+  # ── Prometheus self-monitoring ────────────────────────────────────────────
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

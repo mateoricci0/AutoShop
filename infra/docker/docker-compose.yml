@@ -1,0 +1,585 @@
+version: "3.9"
+
+# ============================================================
+# ASE — Autonomous Shopify Engine
+# Main compose file (dev + production on a single machine)
+# Usage: docker compose -f infra/docker/docker-compose.yml up
+# ============================================================
+
+services:
+
+  # ──────────────────────────────────────────────────────────
+  # Infrastructure: PostgreSQL, Redis, MinIO
+  # ──────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ase
+      POSTGRES_USER: ase_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ase_dev_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ase_app -d ase"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ase
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ase
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ase
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin};
+      mc mb local/ase-images --ignore-existing;
+      mc anonymous set public local/ase-images;
+      exit 0;
+      "
+    networks:
+      - ase
+
+  # ──────────────────────────────────────────────────────────
+  # API Services
+  # ──────────────────────────────────────────────────────────
+
+  auth:
+    build:
+      context: ../..
+      dockerfile: services/auth/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      FERNET_KEY: ${FERNET_KEY:-}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      SESSION_TTL_SECONDS: "${SESSION_TTL_SECONDS:-2592000}"
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ase
+
+  product-hunter:
+    build:
+      context: ../..
+      dockerfile: services/product-hunter/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      APIFY_API_KEY: ${APIFY_API_KEY:-}
+      BRIGHTDATA_USERNAME: ${BRIGHTDATA_USERNAME:-}
+      BRIGHTDATA_PASSWORD: ${BRIGHTDATA_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ase
+
+  marketing:
+    build:
+      context: ../..
+      dockerfile: services/marketing/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_PRIMARY: ${LLM_PRIMARY:-deepseek}
+      LLM_PREMIUM: ${LLM_PREMIUM:-openai}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8003:8003"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ase
+
+  image-pipeline:
+    build:
+      context: ../..
+      dockerfile: services/image-pipeline/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      STABILITY_API_KEY: ${STABILITY_API_KEY:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-ase-images}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "8004:8004"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ase
+
+  shopify-publisher:
+    build:
+      context: ../..
+      dockerfile: services/shopify-publisher/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FERNET_KEY: ${FERNET_KEY:-}
+      SHOPIFY_API_VERSION: ${SHOPIFY_API_VERSION:-2024-10}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-ase-images}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8005:8005"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ase
+
+  analytics:
+    build:
+      context: ../..
+      dockerfile: services/analytics/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SHOPIFY_API_VERSION: ${SHOPIFY_API_VERSION:-2024-10}
+      FERNET_KEY: ${FERNET_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8006:8006"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ase
+
+  notifications:
+    build:
+      context: ../..
+      dockerfile: services/notifications/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      DISCORD_WEBHOOK: ${DISCORD_WEBHOOK:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      SLACK_WEBHOOK: ${SLACK_WEBHOOK:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8007:8007"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ase
+
+  # ──────────────────────────────────────────────────────────
+  # Celery Workers — one per domain queue
+  # ──────────────────────────────────────────────────────────
+
+  ph-worker:
+    build:
+      context: ../..
+      dockerfile: services/product-hunter/Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      APIFY_API_KEY: ${APIFY_API_KEY:-}
+      BRIGHTDATA_USERNAME: ${BRIGHTDATA_USERNAME:-}
+      BRIGHTDATA_PASSWORD: ${BRIGHTDATA_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      product-hunter:
+        condition: service_healthy
+    networks:
+      - ase
+
+  mkt-worker:
+    build:
+      context: ../..
+      dockerfile: services/marketing/Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_PRIMARY: ${LLM_PRIMARY:-deepseek}
+      LLM_PREMIUM: ${LLM_PREMIUM:-openai}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      marketing:
+        condition: service_healthy
+    networks:
+      - ase
+
+  img-worker:
+    build:
+      context: ../..
+      dockerfile: services/image-pipeline/Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      STABILITY_API_KEY: ${STABILITY_API_KEY:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-ase-images}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      image-pipeline:
+        condition: service_healthy
+    networks:
+      - ase
+
+  pub-worker:
+    build:
+      context: ../..
+      dockerfile: services/shopify-publisher/Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FERNET_KEY: ${FERNET_KEY:-}
+      SHOPIFY_API_VERSION: ${SHOPIFY_API_VERSION:-2024-10}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-ase-images}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      shopify-publisher:
+        condition: service_healthy
+    networks:
+      - ase
+
+  ana-worker:
+    build:
+      context: ../..
+      dockerfile: services/analytics/Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SHOPIFY_API_VERSION: ${SHOPIFY_API_VERSION:-2024-10}
+      FERNET_KEY: ${FERNET_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+    networks:
+      - ase
+
+  notif-worker:
+    build:
+      context: ../..
+      dockerfile: services/notifications/Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      DISCORD_WEBHOOK: ${DISCORD_WEBHOOK:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      SLACK_WEBHOOK: ${SLACK_WEBHOOK:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      notifications:
+        condition: service_healthy
+    networks:
+      - ase
+
+  # ──────────────────────────────────────────────────────────
+  # Celery Beat Scheduler
+  # ──────────────────────────────────────────────────────────
+
+  scheduler:
+    build:
+      context: ../..
+      dockerfile: services/scheduler/Dockerfile
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://ase_app:${POSTGRES_PASSWORD:-ase_dev_password}@postgres:5432/ase
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - ase
+
+  # ──────────────────────────────────────────────────────────
+  # Frontend Dashboard (Next.js 15)
+  # ──────────────────────────────────────────────────────────
+
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: services/dashboard/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      AUTH_SERVICE_URL: http://auth:8001
+      HUNTER_SERVICE_URL: http://product-hunter:8002
+      MARKETING_SERVICE_URL: http://marketing:8003
+      IMAGES_SERVICE_URL: http://image-pipeline:8004
+      PUBLISHER_SERVICE_URL: http://shopify-publisher:8005
+      ANALYTICS_SERVICE_URL: http://analytics:8006
+      NOTIFICATIONS_SERVICE_URL: http://notifications:8007
+    depends_on:
+      auth:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - ase
+
+  # ──────────────────────────────────────────────────────────
+  # Reverse Proxy (Nginx)
+  # ──────────────────────────────────────────────────────────
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ../../infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - dashboard
+      - auth
+    networks:
+      - ase
+
+  # ──────────────────────────────────────────────────────────
+  # Monitoring: Prometheus + Grafana
+  # ──────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ../../infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    networks:
+      - ase
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../../infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - ase
+
+# ──────────────────────────────────────────────────────────
+# Volumes
+# ──────────────────────────────────────────────────────────
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+
+# ──────────────────────────────────────────────────────────
+# Networks
+# ──────────────────────────────────────────────────────────
+
+networks:
+  ase:
+    driver: bridge

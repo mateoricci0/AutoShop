@@ -1,0 +1,111 @@
+# ============================================================
+# ASE — Development overrides (hot reload, source mounts)
+# Usage: docker compose -f infra/docker/docker-compose.yml \
+#                       -f infra/docker/docker-compose.dev.yml up
+# ============================================================
+
+services:
+
+  auth:
+    volumes:
+      - ../../services/auth/app:/app/app
+      - ../../shared/python:/shared
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+    environment:
+      ENVIRONMENT: development
+
+  product-hunter:
+    volumes:
+      - ../../services/product-hunter/app:/app/app
+      - ../../shared/python:/shared
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+    environment:
+      ENVIRONMENT: development
+
+  marketing:
+    volumes:
+      - ../../services/marketing/app:/app/app
+      - ../../shared/python:/shared
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8003 --reload
+    environment:
+      ENVIRONMENT: development
+
+  image-pipeline:
+    volumes:
+      - ../../services/image-pipeline/app:/app/app
+      - ../../shared/python:/shared
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8004 --reload
+    environment:
+      ENVIRONMENT: development
+
+  shopify-publisher:
+    volumes:
+      - ../../services/shopify-publisher/app:/app/app
+      - ../../shared/python:/shared
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8005 --reload
+    environment:
+      ENVIRONMENT: development
+
+  analytics:
+    volumes:
+      - ../../services/analytics/app:/app/app
+      - ../../shared/python:/shared
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8006 --reload
+    environment:
+      ENVIRONMENT: development
+
+  notifications:
+    volumes:
+      - ../../services/notifications/app:/app/app
+      - ../../shared/python:/shared
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8007 --reload
+    environment:
+      ENVIRONMENT: development
+
+  # Workers with source mounts (no auto-reload; restart manually)
+  ph-worker:
+    volumes:
+      - ../../services/product-hunter/app:/app/app
+      - ../../shared/python:/shared
+
+  mkt-worker:
+    volumes:
+      - ../../services/marketing/app:/app/app
+      - ../../shared/python:/shared
+
+  img-worker:
+    volumes:
+      - ../../services/image-pipeline/app:/app/app
+      - ../../shared/python:/shared
+
+  pub-worker:
+    volumes:
+      - ../../services/shopify-publisher/app:/app/app
+      - ../../shared/python:/shared
+
+  ana-worker:
+    volumes:
+      - ../../services/analytics/app:/app/app
+      - ../../shared/python:/shared
+
+  notif-worker:
+    volumes:
+      - ../../services/notifications/app:/app/app
+      - ../../shared/python:/shared
+
+  scheduler:
+    volumes:
+      - ../../services/scheduler/app:/app/app
+      - ../../shared/python:/shared
+
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: services/dashboard/Dockerfile.dev
+    volumes:
+      - ../../services/dashboard:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+    environment:
+      NODE_ENV: development
