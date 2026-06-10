@@ -64,7 +64,7 @@ async def ready(response: Response) -> dict[str, Any]:
 
     checks["database"] = "ok" if db_ok else "error"
 
-    all_ok = all(v == "ok" for v in checks.items())
+    all_ok = all(v == "ok" for v in checks.values())
     if not all_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 

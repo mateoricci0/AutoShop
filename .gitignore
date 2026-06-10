@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+.venv/
+venv/
+*.so
+*.pyd
+
+# Node
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+out/
+
+# Environment — NEVER COMMIT THESE
+.env
+.env.local
+.env.*.local
+*.env
+
+# Docker volumes / overrides
+.docker/
+docker-compose.override.yml
+
+# Secrets / credentials
+*.pem
+*.key
+*.p12
+*.crt
+credentials.json
+service-account.json
+
+# OS
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Alembic
+# (versions are committed; local DB state is not)
+
+# Test artifacts
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+
+# Temporary
+*.tmp
+*.bak
+.cache/
