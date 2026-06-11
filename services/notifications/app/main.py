@@ -11,6 +11,7 @@ from ase_shared.cache.redis import close_redis, ping_redis
 from ase_shared.logging.config import configure_logging
 
 from .config import settings
+from .routes.notifications import router as notifications_router
 
 configure_logging("notifications")
 logger = structlog.get_logger()
@@ -34,6 +35,8 @@ app = FastAPI(
 )
 
 Instrumentator().instrument(app).expose(app)
+
+app.include_router(notifications_router, prefix="/v1")
 
 
 @app.get("/health", tags=["ops"])

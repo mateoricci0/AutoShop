@@ -97,7 +97,7 @@ export function Sidebar() {
           <p className="text-xs text-muted-foreground">
             Autonomous Shopify Engine
           </p>
-          <p className="text-xs text-muted-foreground">v0.4.0 — Phase 4</p>
+          <p className="text-xs text-muted-foreground">v0.5.0 — Phase 5</p>
         </div>
       </aside>
     </>

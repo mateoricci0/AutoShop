@@ -15,6 +15,7 @@ import {
   Loader2,
   Bell,
   Bot,
+  Send,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/format'
@@ -44,6 +45,8 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import type { Store as StoreType } from '@/types/store'
+
+const apiBase = process.env.NEXT_PUBLIC_API_URL ?? ''
 
 // ---- Store form schema ----
 const storeSchema = z.object({
@@ -430,61 +433,218 @@ function StoresTab() {
   )
 }
 
-// ---- Notifications tab (placeholder) ----
+// ---- Notifications tab ----
+interface ChannelConfig {
+  discord: boolean
+  telegram: boolean
+  slack: boolean
+  email: boolean
+}
+
+const CHANNEL_LABELS: Record<keyof ChannelConfig, string> = {
+  discord: 'Discord',
+  telegram: 'Telegram',
+  slack: 'Slack',
+  email: 'Email',
+}
+
 function NotificationsTab() {
+  const { data: config, isLoading } = useQuery<ChannelConfig>({
+    queryKey: ['notifications', 'config'],
+    queryFn: async () => {
+      const res = await fetch(`${apiBase}/api/notifications/v1/notifications/config`)
+      if (!res.ok) throw new Error('Failed to fetch config')
+      return res.json()
+    },
+    staleTime: 30_000,
+  })
+
+  const testMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`${apiBase}/api/notifications/v1/notifications/test`, {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error('Failed to send test')
+      return res.json()
+    },
+    onSuccess: () => toast.success('Notificación de prueba enviada'),
+    onError: () => toast.error('Error al enviar la prueba'),
+  })
+
+  const channels = config
+    ? (Object.entries(config) as [keyof ChannelConfig, boolean][])
+    : []
+
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Bell className="h-5 w-5 text-muted-foreground" />
-          <CardTitle className="text-base">Notificaciones</CardTitle>
-        </div>
-        <CardDescription>
-          Configura los canales de notificación: Email, Discord, Telegram, Slack
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center justify-center py-8 text-center">
-          <div>
-            <Bell className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-            <p className="text-sm font-medium">Disponible en Phase 5</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              La configuración de notificaciones estará disponible cuando se
-              implemente el servicio de notificaciones.
-            </p>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bell className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <CardTitle className="text-base">Canales de Notificación</CardTitle>
+                <CardDescription className="text-xs">
+                  Configurados via variables de entorno en el servidor
+                </CardDescription>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => testMutation.mutate()}
+              disabled={testMutation.isPending}
+            >
+              {testMutation.isPending ? (
+                <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+              ) : (
+                <Send className="mr-2 h-3 w-3" />
+              )}
+              Probar canales
+            </Button>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {channels.map(([channel, configured]) => (
+                <div
+                  key={channel}
+                  className="flex items-center justify-between rounded-lg border px-4 py-2.5"
+                >
+                  <span className="text-sm font-medium">{CHANNEL_LABELS[channel]}</span>
+                  <Badge variant={configured ? 'success' : 'secondary'} className="text-xs">
+                    {configured ? 'Configurado' : 'No configurado'}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Cómo configurar un canal</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-xs text-muted-foreground">
+          <p><strong>Discord:</strong> Agrega <code className="rounded bg-muted px-1">DISCORD_WEBHOOK=https://discord.com/api/webhooks/...</code> al archivo <code className="rounded bg-muted px-1">.env</code></p>
+          <p><strong>Telegram:</strong> Agrega <code className="rounded bg-muted px-1">TELEGRAM_BOT_TOKEN</code> y <code className="rounded bg-muted px-1">TELEGRAM_CHAT_ID</code></p>
+          <p><strong>Slack:</strong> Agrega <code className="rounded bg-muted px-1">SLACK_WEBHOOK=https://hooks.slack.com/...</code></p>
+          <p><strong>Email:</strong> Agrega <code className="rounded bg-muted px-1">SMTP_HOST</code>, <code className="rounded bg-muted px-1">SMTP_USER</code>, <code className="rounded bg-muted px-1">SMTP_PASS</code></p>
+          <p className="mt-2 text-muted-foreground/70">Reinicia los contenedores Docker luego de modificar el .env.</p>
+        </CardContent>
+      </Card>
+    </div>
   )
 }
 
-// ---- Agents tab (placeholder) ----
+// ---- Agents tab ----
+interface ScheduledJob {
+  id: string
+  name: string
+  task: string
+  cron: string
+  enabled: boolean
+  last_run_at: string | null
+}
+
 function AgentsTab() {
+  const queryClient = useQueryClient()
+
+  const { data: jobs = [], isLoading } = useQuery<ScheduledJob[]>({
+    queryKey: ['analytics', 'jobs'],
+    queryFn: async () => {
+      const res = await fetch(`${apiBase}/api/analytics/v1/jobs`)
+      if (!res.ok) throw new Error('Failed to fetch jobs')
+      return res.json()
+    },
+    staleTime: 60_000,
+  })
+
+  const toggleMutation = useMutation({
+    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      const res = await fetch(`${apiBase}/api/analytics/v1/jobs/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!res.ok) throw new Error('Failed to update job')
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'jobs'] })
+      toast.success('Job actualizado')
+    },
+    onError: () => toast.error('Error al actualizar el job'),
+  })
+
+  const JOB_LABELS: Record<string, string> = {
+    'hunt-products': 'Caza de Productos',
+    'collect-analytics': 'Recolección de Analytics',
+    'cleanup-sessions': 'Limpieza de Sesiones',
+    'cleanup-tasks': 'Limpieza de Tareas',
+  }
+
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Bot className="h-5 w-5 text-muted-foreground" />
-          <CardTitle className="text-base">Configuración de Agentes</CardTitle>
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-medium">Jobs programados</h3>
+        <p className="text-xs text-muted-foreground">
+          Activa o desactiva los jobs automáticos del scheduler
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-16 animate-pulse rounded-md bg-muted" />
+          ))}
         </div>
-        <CardDescription>
-          Horarios, umbrales y parámetros de cada agente autónomo
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center justify-center py-8 text-center">
-          <div>
-            <Bot className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-            <p className="text-sm font-medium">Disponible en Phase 2</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              La configuración de agentes (schedules, thresholds, etc.) estará
-              disponible cuando se implementen los agentes en Phase 2.
-            </p>
-          </div>
+      ) : jobs.length === 0 ? (
+        <Card className="flex flex-col items-center justify-center py-10 text-center">
+          <Bot className="mb-3 h-8 w-8 text-muted-foreground" />
+          <p className="text-sm">No hay jobs configurados</p>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {jobs.map((job) => (
+            <Card key={job.id}>
+              <CardContent className="flex items-center justify-between py-3 px-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">
+                    {JOB_LABELS[job.name] ?? job.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground font-mono">{job.cron}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge variant={job.enabled ? 'success' : 'secondary'} className="text-xs">
+                    {job.enabled ? 'Activo' : 'Inactivo'}
+                  </Badge>
+                  <Button
+                    size="sm"
+                    variant={job.enabled ? 'default' : 'outline'}
+                    onClick={() => toggleMutation.mutate({ id: job.id, enabled: !job.enabled })}
+                    disabled={toggleMutation.isPending}
+                    className="w-20 text-xs"
+                  >
+                    {toggleMutation.isPending ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : job.enabled ? 'Desactivar' : 'Activar'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   )
 }
 
