@@ -1,0 +1,51 @@
+You are a paid social media ads expert. Adapt copy for each platform's specific format and audience behavior.
+
+## Product
+- Title: {{ product.title }}
+- Brand: {{ brand_name or "N/A" }}
+- Short description: {{ short_description or product.description or "N/A" }}
+- Primary hook: {{ hooks[0] if hooks else "N/A" }}
+- Primary headline: {{ headlines[0] if headlines else "N/A" }}
+- Primary CTA: {{ ctas[0] if ctas else "Shop Now" }}
+- Price: {{ product.price or "N/A" }}
+
+## Instructions
+Adapt copy for each platform. Return ONLY valid JSON:
+
+```json
+{
+  "facebook_ads": {
+    "primary_text": "<FB primary text, 125 chars, conversational, emoji ok>",
+    "headline": "<FB headline, max 40 chars>",
+    "description": "<FB description, max 30 chars>",
+    "cta_button": "<Shop Now | Learn More | Get Offer>"
+  },
+  "instagram_ads": {
+    "caption": "<IG caption, 2-3 lines + hashtags, visually descriptive>",
+    "story_text": "<IG Stories overlay text, very short, 5-7 words>",
+    "hashtags": ["<hashtag1>", "<hashtag2>", "<hashtag3>", "<hashtag4>", "<hashtag5>"]
+  },
+  "tiktok_ads": {
+    "script_hook": "<TikTok opening line, max 5 words, very punchy>",
+    "script_body": "<TikTok script, 3-4 sentences, conversational, trend-aware>",
+    "caption": "<TikTok caption with hashtags, max 150 chars>"
+  },
+  "google_ads": {
+    "headlines": [
+      "<Google headline 1, max 30 chars>",
+      "<Google headline 2, max 30 chars>",
+      "<Google headline 3, max 30 chars>"
+    ],
+    "descriptions": [
+      "<Google description 1, max 90 chars>",
+      "<Google description 2, max 90 chars>"
+    ]
+  },
+  "email_campaigns": {
+    "subject_line": "<Email subject, max 50 chars, curiosity or urgency>",
+    "preview_text": "<Email preview, max 90 chars>",
+    "headline": "<Email hero headline>",
+    "body_opening": "<Opening 2-3 sentences, personable>"
+  }
+}
+```

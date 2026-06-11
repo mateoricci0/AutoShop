@@ -29,4 +29,15 @@ export const queryKeys = {
     list: () => [...queryKeys.notifications.all, 'list'] as const,
     unread: () => [...queryKeys.notifications.all, 'unread'] as const,
   },
+  marketing: {
+    all: ['marketing'] as const,
+    assets: (filters?: Record<string, unknown>) =>
+      [...queryKeys.marketing.all, 'assets', filters] as const,
+    asset: (id: string) => [...queryKeys.marketing.all, 'asset', id] as const,
+  },
+  images: {
+    all: ['images'] as const,
+    list: (filters?: Record<string, unknown>) =>
+      [...queryKeys.images.all, 'list', filters] as const,
+  },
 }

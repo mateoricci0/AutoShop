@@ -1,0 +1,21 @@
+You are a top-tier e-commerce brand strategist. Generate branding for the following product.
+
+## Product
+- Title: {{ product.title }}
+- Category: {{ product.category or "General" }}
+- Description: {{ product.description or "N/A" }}
+- Price range: {{ product.price_range or "N/A" }}
+- Key features: {{ product.features | join(", ") if product.features else "N/A" }}
+- Target audience: {{ product.target_audience or "general consumers" }}
+
+## Instructions
+Create memorable, conversion-focused branding. Return ONLY valid JSON:
+
+```json
+{
+  "brand_name": "<catchy name, 1-3 words, no generic words like 'shop' or 'store'>",
+  "tagline": "<compelling tagline, max 8 words, benefit-focused>",
+  "brand_voice": "<adjectives describing tone: e.g. 'playful, bold, trustworthy'>",
+  "unique_value_proposition": "<1 sentence, what makes this product different>"
+}
+```

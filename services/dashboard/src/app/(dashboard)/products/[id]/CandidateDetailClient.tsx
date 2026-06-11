@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { productsApi } from '@/services/api/products'
+import { marketingApi } from '@/services/api/marketing'
 import { queryKeys } from '@/services/query-keys'
 import { SOURCE_LABELS, STATUS_COLORS } from '@/types/product'
 import { formatCurrency, formatPercent, formatDate } from '@/lib/format'
@@ -31,6 +32,9 @@ import {
   Tag,
   ChevronDown,
   ChevronUp,
+  Megaphone,
+  ImageIcon,
+  Loader2,
 } from 'lucide-react'
 import {
   Radar,
@@ -186,6 +190,8 @@ export default function CandidateDetailClient({ id }: { id: string }) {
   const queryClient = useQueryClient()
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
   const [rawDataOpen, setRawDataOpen] = useState(false)
+  const [generatingMarketing, setGeneratingMarketing] = useState(false)
+  const [generatingImages, setGeneratingImages] = useState(false)
 
   const { data: candidate, isLoading, error } = useQuery({
     queryKey: queryKeys.products.candidates({ id }),
@@ -248,6 +254,30 @@ export default function CandidateDetailClient({ id }: { id: string }) {
   const canAction =
     candidate.status === 'pending' || candidate.status === 'analyzing'
 
+  const handleGenerateMarketing = async () => {
+    setGeneratingMarketing(true)
+    try {
+      await marketingApi.generateAsset(id, candidate.store_id ?? undefined)
+      toast.success('Generando marketing y copy con IA...')
+    } catch {
+      toast.error('Error al iniciar generación de marketing')
+    } finally {
+      setGeneratingMarketing(false)
+    }
+  }
+
+  const handleGenerateImages = async () => {
+    setGeneratingImages(true)
+    try {
+      await marketingApi.generateImages(id, candidate.store_id ?? undefined)
+      toast.success('Generando 7 imágenes con IA...')
+    } catch {
+      toast.error('Error al iniciar generación de imágenes')
+    } finally {
+      setGeneratingImages(false)
+    }
+  }
+
   return (
     <div className="space-y-6 max-w-5xl">
       {/* Back button */}
@@ -298,27 +328,57 @@ export default function CandidateDetailClient({ id }: { id: string }) {
         </div>
 
         {/* Action buttons */}
-        {canAction && (
-          <div className="flex gap-2 shrink-0">
-            <Button
-              variant="outline"
-              className="text-destructive border-destructive hover:bg-destructive hover:text-destructive-foreground"
-              onClick={() => setRejectDialogOpen(true)}
-              disabled={rejectMutation.isPending || approveMutation.isPending}
-            >
-              <XCircle className="mr-2 h-4 w-4" />
-              Rechazar
-            </Button>
-            <Button
-              className="bg-green-600 hover:bg-green-700 text-white"
-              onClick={() => approveMutation.mutate()}
-              disabled={approveMutation.isPending || rejectMutation.isPending}
-            >
-              <CheckCircle className="mr-2 h-4 w-4" />
-              Aprobar
-            </Button>
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2 shrink-0">
+          {canAction && (
+            <>
+              <Button
+                variant="outline"
+                className="text-destructive border-destructive hover:bg-destructive hover:text-destructive-foreground"
+                onClick={() => setRejectDialogOpen(true)}
+                disabled={rejectMutation.isPending || approveMutation.isPending}
+              >
+                <XCircle className="mr-2 h-4 w-4" />
+                Rechazar
+              </Button>
+              <Button
+                className="bg-green-600 hover:bg-green-700 text-white"
+                onClick={() => approveMutation.mutate()}
+                disabled={approveMutation.isPending || rejectMutation.isPending}
+              >
+                <CheckCircle className="mr-2 h-4 w-4" />
+                Aprobar
+              </Button>
+            </>
+          )}
+          {candidate.status === 'approved' && (
+            <>
+              <Button
+                variant="outline"
+                onClick={handleGenerateMarketing}
+                disabled={generatingMarketing}
+              >
+                {generatingMarketing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Megaphone className="mr-2 h-4 w-4" />
+                )}
+                Generar copy
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleGenerateImages}
+                disabled={generatingImages}
+              >
+                {generatingImages ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <ImageIcon className="mr-2 h-4 w-4" />
+                )}
+                Generar imágenes
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Image gallery */}

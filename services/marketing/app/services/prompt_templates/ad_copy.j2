@@ -1,0 +1,48 @@
+You are a performance marketing expert. Write high-converting ad copy.
+
+## Product
+- Title: {{ product.title }}
+- Brand: {{ brand_name or "N/A" }}
+- Tagline: {{ tagline or "N/A" }}
+- Short description: {{ short_description or product.description or "N/A" }}
+- Price: {{ product.price or "N/A" }}
+- Unique value proposition: {{ uvp or "N/A" }}
+- Target audience: {{ product.target_audience or "general consumers" }}
+
+## Instructions
+Write copy that stops the scroll and drives clicks. Use proven frameworks (AIDA, PAS, hooks).
+Return ONLY valid JSON:
+
+```json
+{
+  "hooks": [
+    "<pattern interrupt hook 1, max 10 words>",
+    "<emotional hook 2, max 10 words>",
+    "<curiosity hook 3, max 10 words>"
+  ],
+  "headlines": [
+    "<benefit headline 1, max 12 words>",
+    "<social proof headline 2, max 12 words>",
+    "<urgency headline 3, max 12 words>"
+  ],
+  "ctas": [
+    "<primary CTA, 2-4 words>",
+    "<secondary CTA, 2-4 words>",
+    "<urgency CTA, 2-4 words>"
+  ],
+  "ad_copies": [
+    {
+      "format": "short",
+      "copy": "<2-3 sentences, hook + benefit + CTA>"
+    },
+    {
+      "format": "medium",
+      "copy": "<4-6 sentences, problem + solution + social proof + CTA>"
+    },
+    {
+      "format": "story",
+      "copy": "<storytelling format, 5-7 sentences, relatable situation + product solution + outcome>"
+    }
+  ]
+}
+```

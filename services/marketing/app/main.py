@@ -11,6 +11,8 @@ from ase_shared.cache.redis import close_redis, ping_redis
 from ase_shared.logging.config import configure_logging
 
 from .config import settings
+from .routes.assets import router as assets_router
+from .routes.generate import router as generate_router
 
 configure_logging("marketing")
 logger = structlog.get_logger()
@@ -34,6 +36,9 @@ app = FastAPI(
 )
 
 Instrumentator().instrument(app).expose(app)
+
+app.include_router(assets_router, prefix="/v1")
+app.include_router(generate_router, prefix="/v1")
 
 
 @app.get("/health", tags=["ops"])
