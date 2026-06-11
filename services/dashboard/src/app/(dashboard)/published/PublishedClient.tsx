@@ -1,123 +1,159 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
-import { ExternalLink, ShoppingBag } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import Link from 'next/link'
+import { publisherApi } from '@/services/api/publisher'
 import { queryKeys } from '@/services/query-keys'
-import { productsApi } from '@/services/api/products'
-import { useActiveStore } from '@/hooks/useActiveStore'
-import { formatCurrency, formatDate } from '@/lib/format'
-import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { PUBLISHED_STATUS_COLORS, PUBLISHED_STATUS_LABELS } from '@/types/publisher'
+import type { PublishedProduct, PublishedStatus } from '@/types/publisher'
+import { formatDate, formatCurrency } from '@/lib/format'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { toast } from 'sonner'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  ExternalLink,
+  RefreshCw,
+  Archive,
+  ChevronRight,
+  ShoppingBag,
+} from 'lucide-react'
+import { cn } from '@/lib/utils'
 
-const statusVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
-  active: 'default',
-  draft: 'secondary',
-  archived: 'outline',
+function StatusBadge({ status }: { status: PublishedStatus }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+        PUBLISHED_STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-700',
+      )}
+    >
+      {PUBLISHED_STATUS_LABELS[status] ?? status}
+    </span>
+  )
 }
 
-const statusLabel: Record<string, string> = {
-  active: 'Activo',
-  draft: 'Borrador',
-  archived: 'Archivado',
+function ProductRow({ product }: { product: PublishedProduct }) {
+  const queryClient = useQueryClient()
+
+  const syncMutation = useMutation({
+    mutationFn: () => publisherApi.syncFromShopify(product.id),
+    onSuccess: () => {
+      toast.success('Sincronizado con Shopify')
+      queryClient.invalidateQueries({ queryKey: queryKeys.publisher.all })
+    },
+    onError: () => toast.error('Error al sincronizar'),
+  })
+
+  return (
+    <div className="flex items-center gap-4 rounded-lg border bg-card px-4 py-3 hover:bg-accent/30 transition-colors">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10">
+        <ShoppingBag className="h-5 w-5 text-primary" />
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/published/${product.id}`}
+            className="font-medium text-sm hover:underline truncate"
+          >
+            {product.title}
+          </Link>
+          <StatusBadge status={product.status} />
+        </div>
+        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+          <span>{formatCurrency(parseFloat(product.price))}</span>
+          {product.shopify_handle && (
+            <span className="truncate max-w-[200px]">/{product.shopify_handle}</span>
+          )}
+          <span>Publicado {product.published_at ? formatDate(product.published_at) : '—'}</span>
+          {product.last_synced_at && (
+            <span>Sync {formatDate(product.last_synced_at)}</span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 shrink-0">
+        {product.shopify_product_id && (
+          <a
+            href={`https://admin.shopify.com/products/${product.shopify_product_id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Ver en Shopify"
+          >
+            <Button variant="ghost" size="icon" className="h-8 w-8">
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          </a>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={() => syncMutation.mutate()}
+          disabled={syncMutation.isPending}
+          title="Sincronizar desde Shopify"
+        >
+          <RefreshCw className={cn('h-4 w-4', syncMutation.isPending && 'animate-spin')} />
+        </Button>
+        <Link href={`/published/${product.id}`}>
+          <Button variant="ghost" size="icon" className="h-8 w-8">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </Link>
+      </div>
+    </div>
+  )
 }
 
-export function PublishedClient() {
-  const { activeStoreId } = useActiveStore()
-
-  const { data, isLoading } = useQuery({
-    queryKey: queryKeys.products.published(activeStoreId ?? undefined),
+export default function PublishedClient() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: queryKeys.publisher.published(),
     queryFn: async () => {
-      const res = await productsApi.getPublished(activeStoreId ?? undefined)
+      const res = await publisherApi.listPublished({ limit: 100 })
       return res.data
     },
     staleTime: 30_000,
   })
 
-  const products = data?.items ?? []
-
   if (isLoading) {
     return (
-      <Card className="p-4 space-y-3">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-12 w-full" />
+      <div className="space-y-3">
+        {[...Array(4)].map((_, i) => (
+          <Skeleton key={i} className="h-16 w-full rounded-lg" />
         ))}
-      </Card>
+      </div>
     )
   }
 
-  if (products.length === 0) {
+  if (error) {
     return (
-      <Card className="flex flex-col items-center justify-center py-16 text-center">
-        <ShoppingBag className="mb-3 h-8 w-8 text-muted-foreground" />
+      <p className="text-sm text-muted-foreground">
+        Error al cargar productos publicados.
+      </p>
+    )
+  }
+
+  const items = data?.items ?? []
+
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
+        <ShoppingBag className="h-12 w-12 text-muted-foreground/30" />
         <p className="text-sm font-medium">No hay productos publicados</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Aprueba candidatos para publicarlos en Shopify
+        <p className="text-xs text-muted-foreground max-w-xs">
+          Aprueba un candidato, genera su copy e imágenes, y luego usa el botón
+          "Publicar en Shopify" en el detalle del producto.
         </p>
-      </Card>
+      </div>
     )
   }
 
   return (
-    <Card>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Producto</TableHead>
-            <TableHead>Estado</TableHead>
-            <TableHead>Precio</TableHead>
-            <TableHead>Inventario</TableHead>
-            <TableHead>Publicado</TableHead>
-            <TableHead>Shopify</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {products.map((product) => (
-            <TableRow key={product.id}>
-              <TableCell className="font-medium">
-                <span className="line-clamp-1 max-w-[200px]">{product.title}</span>
-              </TableCell>
-              <TableCell>
-                <Badge variant={statusVariant[product.status] ?? 'secondary'} className="text-xs">
-                  {statusLabel[product.status] ?? product.status}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-sm">
-                <div>
-                  <p>{formatCurrency(product.price)}</p>
-                  {product.compare_at_price && (
-                    <p className="text-xs text-muted-foreground line-through">
-                      {formatCurrency(product.compare_at_price)}
-                    </p>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell className="text-sm">{product.inventory_quantity}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {formatDate(product.published_at)}
-              </TableCell>
-              <TableCell>
-                <a
-                  href={`https://admin.shopify.com/products/${product.shopify_product_id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                >
-                  Ver <ExternalLink className="h-3 w-3" />
-                </a>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Card>
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">{data?.total ?? items.length} productos</p>
+      {items.map((p) => (
+        <ProductRow key={p.id} product={p} />
+      ))}
+    </div>
   )
 }

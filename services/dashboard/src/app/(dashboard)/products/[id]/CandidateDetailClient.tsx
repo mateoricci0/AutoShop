@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { productsApi } from '@/services/api/products'
 import { marketingApi } from '@/services/api/marketing'
+import { publisherApi } from '@/services/api/publisher'
 import { queryKeys } from '@/services/query-keys'
 import { SOURCE_LABELS, STATUS_COLORS } from '@/types/product'
 import { formatCurrency, formatPercent, formatDate } from '@/lib/format'
@@ -35,6 +36,7 @@ import {
   Megaphone,
   ImageIcon,
   Loader2,
+  ShoppingCart,
 } from 'lucide-react'
 import {
   Radar,
@@ -185,6 +187,83 @@ function RejectDialog({ open, onClose, onConfirm, isPending }: RejectDialogProps
   )
 }
 
+interface PublishDialogProps {
+  open: boolean
+  onClose: () => void
+  onConfirm: (price: number, compareAtPrice: number | null, vendor: string) => void
+  isPending: boolean
+  defaultPrice: number | null
+}
+
+function PublishDialog({ open, onClose, onConfirm, isPending, defaultPrice }: PublishDialogProps) {
+  const [price, setPrice] = useState(defaultPrice?.toString() ?? '')
+  const [compareAt, setCompareAt] = useState('')
+  const [vendor, setVendor] = useState('')
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Publicar en Shopify</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Precio de venta *</p>
+            <Input
+              type="number"
+              placeholder="29.99"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              step="0.01"
+              min="0.01"
+            />
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Precio tachado (opcional)</p>
+            <Input
+              type="number"
+              placeholder="59.99"
+              value={compareAt}
+              onChange={(e) => setCompareAt(e.target.value)}
+              step="0.01"
+              min="0"
+            />
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Vendor (opcional)</p>
+            <Input
+              placeholder="Mi Tienda"
+              value={vendor}
+              onChange={(e) => setVendor(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={() =>
+              onConfirm(
+                parseFloat(price),
+                compareAt ? parseFloat(compareAt) : null,
+                vendor,
+              )
+            }
+            disabled={isPending || !price || isNaN(parseFloat(price))}
+          >
+            {isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <ShoppingCart className="mr-2 h-4 w-4" />
+            )}
+            Publicar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export default function CandidateDetailClient({ id }: { id: string }) {
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -192,6 +271,8 @@ export default function CandidateDetailClient({ id }: { id: string }) {
   const [rawDataOpen, setRawDataOpen] = useState(false)
   const [generatingMarketing, setGeneratingMarketing] = useState(false)
   const [generatingImages, setGeneratingImages] = useState(false)
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false)
+  const [publishing, setPublishing] = useState(false)
 
   const { data: candidate, isLoading, error } = useQuery({
     queryKey: queryKeys.products.candidates({ id }),
@@ -275,6 +356,34 @@ export default function CandidateDetailClient({ id }: { id: string }) {
       toast.error('Error al iniciar generación de imágenes')
     } finally {
       setGeneratingImages(false)
+    }
+  }
+
+  const handlePublish = async (price: number, compareAtPrice: number | null, vendor: string) => {
+    if (!candidate.store_id) {
+      toast.error('Este candidato no tiene tienda asignada')
+      return
+    }
+    setPublishing(true)
+    try {
+      await publisherApi.publish({
+        candidate_id: id,
+        store_id: candidate.store_id,
+        price,
+        compare_at_price: compareAtPrice,
+        vendor: vendor || undefined,
+      })
+      toast.success('Publicación iniciada en Shopify')
+      setPublishDialogOpen(false)
+      queryClient.invalidateQueries({ queryKey: queryKeys.products.all })
+      router.push('/published')
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        'Error al publicar'
+      toast.error(msg)
+    } finally {
+      setPublishing(false)
     }
   }
 
@@ -375,6 +484,18 @@ export default function CandidateDetailClient({ id }: { id: string }) {
                   <ImageIcon className="mr-2 h-4 w-4" />
                 )}
                 Generar imágenes
+              </Button>
+              <Button
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                onClick={() => setPublishDialogOpen(true)}
+                disabled={publishing}
+              >
+                {publishing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <ShoppingCart className="mr-2 h-4 w-4" />
+                )}
+                Publicar en Shopify
               </Button>
             </>
           )}
@@ -570,6 +691,15 @@ export default function CandidateDetailClient({ id }: { id: string }) {
         onClose={() => setRejectDialogOpen(false)}
         onConfirm={(reason) => rejectMutation.mutate(reason)}
         isPending={rejectMutation.isPending}
+      />
+
+      {/* Publish dialog */}
+      <PublishDialog
+        open={publishDialogOpen}
+        onClose={() => setPublishDialogOpen(false)}
+        onConfirm={handlePublish}
+        isPending={publishing}
+        defaultPrice={candidate.recommended_price ? parseFloat(String(candidate.recommended_price)) : null}
       />
     </div>
   )

@@ -1,4 +1,4 @@
-"""Shopify Publisher Service — uploads images and creates products in Shopify stores."""
+"""Shopify Publisher Service — publishes approved products to Shopify stores."""
 
 from contextlib import asynccontextmanager
 from typing import Any
@@ -11,6 +11,9 @@ from ase_shared.cache.redis import close_redis, ping_redis
 from ase_shared.logging.config import configure_logging
 
 from .config import settings
+from .routes.publish import router as publish_router
+from .routes.published import router as published_router
+from .routes.webhooks import router as webhooks_router
 
 configure_logging("shopify-publisher")
 logger = structlog.get_logger()
@@ -28,23 +31,25 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
 
 app = FastAPI(
     title="ASE Shopify Publisher",
-    description="Uploads images and creates/updates products in Shopify stores.",
+    description="Publishes approved products to Shopify stores.",
     version="0.1.0",
     lifespan=lifespan,
 )
 
 Instrumentator().instrument(app).expose(app)
 
+app.include_router(publish_router, prefix="/v1")
+app.include_router(published_router, prefix="/v1")
+app.include_router(webhooks_router, prefix="/v1")
+
 
 @app.get("/health", tags=["ops"])
 async def health() -> dict[str, str]:
-    """Liveness probe — returns 200 if the process is running."""
     return {"status": "ok", "service": SERVICE_NAME}
 
 
 @app.get("/ready", tags=["ops"])
 async def ready(response: Response) -> dict[str, Any]:
-    """Readiness probe — checks downstream dependencies."""
     checks: dict[str, str] = {}
 
     redis_ok = await ping_redis()

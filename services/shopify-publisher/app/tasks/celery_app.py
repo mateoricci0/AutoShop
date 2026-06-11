@@ -2,4 +2,4 @@
 
 from ase_shared.messaging.celery_config import make_celery
 
-celery_app = make_celery("shopify-publisher")
+celery_app = make_celery("publisher")

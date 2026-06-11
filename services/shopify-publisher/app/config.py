@@ -9,8 +9,8 @@ class Settings(BaseSettings):
 
     FERNET_KEY: str = ""
     SHOPIFY_API_VERSION: str = "2024-10"
+    SHOPIFY_WEBHOOK_SECRET: str = ""
 
-    # Storage (MinIO / S3) — for image uploads
     S3_ENDPOINT: str = "http://minio:9000"
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"

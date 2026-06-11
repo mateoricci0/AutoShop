@@ -40,4 +40,12 @@ export const queryKeys = {
     list: (filters?: Record<string, unknown>) =>
       [...queryKeys.images.all, 'list', filters] as const,
   },
+  publisher: {
+    all: ['publisher'] as const,
+    published: (filters?: Record<string, unknown>) =>
+      [...queryKeys.publisher.all, 'published', filters] as const,
+    detail: (id: string) => [...queryKeys.publisher.all, 'published', id] as const,
+    checklist: (candidateId: string, storeId: string) =>
+      [...queryKeys.publisher.all, 'checklist', candidateId, storeId] as const,
+  },
 }
